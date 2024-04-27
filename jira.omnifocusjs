@@ -96,7 +96,6 @@
     const configs = [{
       omnifocusTagToUse: "🧰 JIRA", // you can also use the format "Parent1 : Parent2 : Child"
       jiraQuery: "assignee=currentuser() and resolution is empty",
-      processComments: false, // if true, a subtask is added for each ticket comment
       omnifocusCommentTagToUse: "Jira-Comment",
     }]
     // END EDIT
@@ -104,7 +103,6 @@
     configs.forEach((config) => {
       const omnifocusTagToUse = config.omnifocusTagToUse;
       const jiraQuery = config.jiraQuery;
-      const processComments = config.processComments;
       const omnifocusCommentTagToUse = config.omnifocusCommentTagToUse;
 
       const urlParams = "/rest/api/latest/search?jql=" + encodeURIComponent(jiraQuery);
@@ -158,27 +156,7 @@
       }
       const tasks = tag.tasks;
 
-      const omnifocusComments = {};
-      if (processComments) {
-        // Get all comment tagged tasks
-        var commentTag =
-          tags.byName(omnifocusCommentTagToUse) ||
-          flattenedTags.byName(omnifocusCommentTagToUse) ||
-          new Tag(omnifocusCommentTagToUse);
 
-        const commentTasks = commentTag.tasks;
-        commentTasks.forEach((comment) => {
-          const re = new RegExp(`^[A-Za-z0-9-]+ [0-9]+`);
-          let commentId;
-          try {
-            commentId = comment.name.match(re);
-            if (!commentId) return;
-          } catch {
-            return;
-          }
-          omnifocusComments[commentId] = comment;
-        });
-      }
 
       // cache object instead of array so search will be faster later
       let omnifocusTasks = {};
@@ -199,7 +177,6 @@
       requestPromise.then((response) => {
         let createdTasks = 0;
         let checkedTickets = 0;
-        let createdComments = 0;
         if (response.mimeType == "application/json") {
           const jsonResponse = JSON.parse(response.bodyString);
           // ADD THE TASKS
@@ -227,7 +204,7 @@
           }
 
 
-          //Close Tasks or Update comments if enabled
+          //Close Tasks
           for (const [task_id, task] of Object.entries(omnifocusTasks)) {
             if (!task.jiraToOmnifocusMatched) {
               var can_delete = true;
@@ -243,34 +220,13 @@
                 task.markComplete();
               }
             }
-            // Better check anyway, may the ticket is just reasigned
-            if (processComments) {
-              const commentUrlParams = "/rest/api/2/issue/" + task_id + "/comment"
-              const commentUrl = jiraUrl + commentUrlParams;
-              const commentRequest = URL.FetchRequest.fromString(commentUrl);
-              commentRequest.method = "GET";
-              commentRequest.headers = { Authorization: `Basic ${credentials}` };
-              var requestPromiseComment = commentRequest.fetch();
-              requestPromiseComment.then((commentResponse) => {
-                const jsonComments = JSON.parse(commentResponse.bodyString);
-                for (const comment of jsonComments.comments) {
-                  const comment_id = task_id + " " + comment.id;
-                  if (!omnifocusComments[comment_id]) {
-                    const taskName = comment_id + " Comment:\n" + comment.body;
-                    const newTask = new Task(taskName, task);
-                    newTask.addTag(commentTag);
-                    createdComments++;
-                  }
-                }
-              });
-            }
           };
         }
-        console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks, Added ${createdComments} Subtickets for Comments`);
+        console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks);
       });
 
       requestPromise.catch((err) => {
-        console.log(`DEBUG: catch error ${err}`);
+        console.log(`DEBUG: catch error ${ err } `);
       });
     });
 

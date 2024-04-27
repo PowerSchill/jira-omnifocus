@@ -19,6 +19,22 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
+### Important
+
+The Plugin Identifies the Tasks by the Ticket Number, which needs to be in Front of the Task Name. But you can edit everything else behind this Number. Also, the Note, which is as default the Link to the ticket and the ticket description or move the tasks to the projects you want. If you remove the Tag, the Tasks will no longer touched by the plugin.
+
+### What the plugin does
+
+- It queries all Ticket which are Assigned to you and Open from Jira
+- Queries all Tasks with the given Tag (default Jira) from OmniFocus
+- You can set even a Filter, by Ticket ID (Regexp)
+- Create new Tasks, or reopen Tasks if they appear in Jira
+- Closes all Tasks with the given Tag which not appear in Jira
+
+### Features
+
+- Stand-alone Plugin without any requirements.
+
 <!-- GETTING STARTED -->
 ## Getting Started
 
