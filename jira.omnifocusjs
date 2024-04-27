@@ -24,6 +24,7 @@
     try {
       // Hold down control keys to reset values
       if (app.controlKeyDown) {
+        let alertMessage = "Reset the stored count?"
         alert = new Alert("Confirmation Required", alertMessage)
         alert.addOption("Reset")
         alert.addOption("Cancel")
@@ -92,22 +93,26 @@
 
     preferences.write("incrementedCount", incrementedCount + 1)
 
+    console.log("Finished with preferences")
+
+    console.log("JIRA URL:", jiraUrl)
     // START EDIT
     const configs = [{
       omnifocusTagToUse: "🧰 JIRA", // you can also use the format "Parent1 : Parent2 : Child"
       jiraQuery: "assignee=currentuser() and resolution is empty",
-      omnifocusCommentTagToUse: "Jira-Comment",
     }]
     // END EDIT
 
+
     configs.forEach((config) => {
+
       const omnifocusTagToUse = config.omnifocusTagToUse;
       const jiraQuery = config.jiraQuery;
-      const omnifocusCommentTagToUse = config.omnifocusCommentTagToUse;
 
       const urlParams = "/rest/api/latest/search?jql=" + encodeURIComponent(jiraQuery);
+      console.log(urlParams)
       const url = jiraUrl + urlParams;
-
+      console.log(url)
       const request = URL.FetchRequest.fromString(url);
       request.method = "GET";
       request.headers = { Authorization: `Bearer ${jiraAPIKey}` };
@@ -116,6 +121,8 @@
 
       // Find the tag
       let tag = null;
+
+      console.log("BreakPoint")
 
       // If user gave an absolute path, parse it and process it
       const parsedOmnifocusTagToUse = omnifocusTagToUse.split(" : ");
@@ -174,6 +181,7 @@
         omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
       });
 
+      console.log("Beginning Call")
       requestPromise.then((response) => {
         let createdTasks = 0;
         let checkedTickets = 0;
