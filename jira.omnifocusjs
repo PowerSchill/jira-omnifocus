@@ -222,11 +222,11 @@
             }
           };
         }
-        console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks);
+        console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks`);
       });
 
       requestPromise.catch((err) => {
-        console.log(`DEBUG: catch error ${ err } `);
+        console.log(`DEBUG: catch error ${err} `);
       });
     });
 
