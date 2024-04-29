@@ -10,6 +10,9 @@
 }*/
 (() => {
 
+
+  const maxResultsPerPage = 1000;
+
   // Configure Preferences
   var preferences = new Preferences()
 
@@ -113,7 +116,7 @@
     preferences.write("incrementedCount", incrementedCount + 1)
 
 
-    const urlParams = "/rest/api/latest/search?jql=" + encodeURIComponent(jiraQuery);
+    const urlParams = "/rest/api/latest/search?maxResults=" + maxResultsPerPage + "&jql=" + encodeURIComponent(jiraQuery);
     const url = jiraUrl + urlParams;
 
     const request = URL.FetchRequest.fromString(url);
@@ -186,6 +189,11 @@
       let checkedTickets = 0;
       if (response.mimeType == "application/json") {
         const jsonResponse = JSON.parse(response.bodyString);
+
+        console.log("start", jsonResponse.startAt)
+        console.log("maxResults", jsonResponse.maxResults)
+        console.log("total", jsonResponse.total)
+
 
 
         for (const issue of jsonResponse.issues) {
