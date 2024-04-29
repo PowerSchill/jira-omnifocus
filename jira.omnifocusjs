@@ -24,8 +24,9 @@
     }
 
     jiraUrl = preferences.readString("jiraUrl")
-    //TODO: convert this to a credential
     jiraAPIKey = preferences.readString("jiraAPIKey")
+    omniFocusTag = preferences.readString("omniFocusTag")
+    jiraQuery = preferences.readString("jiraQuery")
 
     try {
       // Hold down control keys to reset values
@@ -47,16 +48,13 @@
       if (incrementedCount === 0) {
         defaultJiraUrl = ""
         defaultJiraAPIKey = ""
+        defaultOmniFocusTag = "jira"
+        defaultjiraQuery = "assignee=currentuser() and resolution is empty"
 
-
-        if (!jiraUrl) {
-          jiraUrl = defaultJiraUrl
-        }
-
-
-        if (!jiraAPIKey) {
-          jiraAPIKey = defaultJiraAPIKey
-        }
+        if (!jiraUrl) { jiraUrl = defaultJiraUrl }
+        if (!jiraAPIKey) { jiraAPIKey = defaultJiraAPIKey }
+        if (!omniFocusTag) { omniFocusTag = defaultOmniFocusTag }
+        if (!jiraQuery) { jiraQuery = defaultjiraQuery }
 
         jiraUrlInputField = new Form.Field.String(
           "jiraUrl",
@@ -64,16 +62,29 @@
           jiraUrl
         )
 
-
         jiraAPIKeyInputField = new Form.Field.String(
           "jiraAPIKey",
           "API Key",
           jiraAPIKey
         )
 
+        omniFocusTagInputField = new Form.Field.String(
+          "omniFocusTag",
+          "OmniFocus Tag",
+          omniFocusTag
+        )
+
+        jiraQueryInputField = new Form.Field.String(
+          "jiraQuery",
+          "JIRA Search Query",
+          jiraQuery
+        )
+
         inputForm = new Form()
         inputForm.addField(jiraUrlInputField)
         inputForm.addField(jiraAPIKeyInputField)
+        inputForm.addField(omniFocusTagInputField)
+        inputForm.addField(jiraQueryInputField)
         inputForm.validate = function (formobject) {
           return true
         }
@@ -83,14 +94,14 @@
         formobject = await inputForm.show(formPrompt, buttonTitle)
 
         jiraUrl = formobject.values['jiraUrl']
-        if (!jiraUrl) { jiraUrl = "" }
-
         jiraAPIKey = formobject.values['jiraAPIKey']
-        if (!jiraAPIKey) { jiraAPIKey = "" }
+        omniFocusTag = formobject.values['omniFocusTag']
+        jiraQuery = formobject.values['jiraQuery']
 
         preferences.write("jiraUrl", jiraUrl)
         preferences.write("jiraAPIKey", jiraAPIKey)
-
+        preferences.write("omniFocusTag", omniFocusTag)
+        preferences.write("jiraQuery", jiraQuery)
       }
     }
     catch (err) {
@@ -101,143 +112,129 @@
 
     preferences.write("incrementedCount", incrementedCount + 1)
 
-    // START EDIT
-    const configs = [{
-      omnifocusTagToUse: "🧰 JIRA", // you can also use the format "Parent1 : Parent2 : Child"
-      jiraQuery: "assignee=currentuser() and resolution is empty",
-    }]
-    // END EDIT
+
+    const urlParams = "/rest/api/latest/search?jql=" + encodeURIComponent(jiraQuery);
+    const url = jiraUrl + urlParams;
+
+    const request = URL.FetchRequest.fromString(url);
+    request.method = "GET";
+    request.headers = { Authorization: `Bearer ${jiraAPIKey}` };
+    const requestPromise = request.fetch()
 
 
-    configs.forEach((config) => {
+    // Find the tag
+    let tag = null;
 
-      const omnifocusTagToUse = config.omnifocusTagToUse;
-      const jiraQuery = config.jiraQuery;
-
-      const urlParams = "/rest/api/latest/search?jql=" + encodeURIComponent(jiraQuery);
-      const url = jiraUrl + urlParams;
-
-      const request = URL.FetchRequest.fromString(url);
-      request.method = "GET";
-      request.headers = { Authorization: `Bearer ${jiraAPIKey}` };
-      const requestPromise = request.fetch();
-
-
-      // Find the tag
-      let tag = null;
-
-      // If user gave an absolute path, parse it and process it
-      const parsedOmnifocusTagToUse = omnifocusTagToUse.split(" : ");
-      if (parsedOmnifocusTagToUse.length > 1) {
-        let currentTag = null;
-        let i;
-        for (i = 0; i < parsedOmnifocusTagToUse.length; i++) {
-          let newTag;
-          if (currentTag) {
-            newTag = currentTag.childNamed(parsedOmnifocusTagToUse[i]);
-          } else {
-            newTag = tags.byName(parsedOmnifocusTagToUse[i]);
-          }
-          if (!newTag) break;
-          currentTag = newTag;
+    // If user gave an absolute path, parse it and process it
+    const parsedOmnifocusTagToUse = omniFocusTag.split(" : ");
+    if (parsedOmnifocusTagToUse.length > 1) {
+      let currentTag = null;
+      let i;
+      for (i = 0; i < parsedOmnifocusTagToUse.length; i++) {
+        let newTag;
+        if (currentTag) {
+          newTag = currentTag.childNamed(parsedOmnifocusTagToUse[i]);
+        } else {
+          newTag = tags.byName(parsedOmnifocusTagToUse[i]);
         }
+        if (!newTag) break;
+        currentTag = newTag;
+      }
 
-        // after all ran, check if its a success, then apply tag
-        if (
-          currentTag &&
-          i === parsedOmnifocusTagToUse.length &&
-          currentTag.name ===
-          parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
-        ) {
-          tag = currentTag;
-        }
+      // after all ran, check if its a success, then apply tag
+      if (
+        currentTag &&
+        i === parsedOmnifocusTagToUse.length &&
+        currentTag.name ===
+        parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
+      ) {
+        tag = currentTag;
       }
-      if (!tag) {
-        // if tag is not found yet
-        tag =
-          tags.byName(omnifocusTagToUse) ||
-          flattenedTags.byName(omnifocusTagToUse) ||
-          new Tag(omnifocusTagToUse);
-      }
-      if (!tag) {
-        console.error(new Error("could not create tag"));
+    }
+    if (!tag) {
+      // if tag is not found yet
+      tag =
+        tags.byName(omniFocusTag) ||
+        flattenedTags.byName(omniFocusTag) ||
+        new Tag(omniFocusTag);
+    }
+    if (!tag) {
+      console.error(new Error("could not create tag"));
+      return;
+    }
+    const tasks = tag.tasks;
+
+    // cache object instead of array so search will be faster later
+    let omnifocusTasks = {};
+    tasks.forEach((task) => {
+      const re = new RegExp(`^[A-Za-z0-9-]+`);
+      let taskId;
+      try {
+        taskId = task.name.match(re)[0];
+        if (!taskId) return;
+      } catch {
         return;
       }
-      const tasks = tag.tasks;
+      omnifocusTasks[taskId] = task;
+      // Reset Jira Match Flag
+      omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
+    });
+
+    requestPromise.then((response) => {
+
+      let createdTasks = 0;
+      let checkedTickets = 0;
+      if (response.mimeType == "application/json") {
+        const jsonResponse = JSON.parse(response.bodyString);
 
 
-
-      // cache object instead of array so search will be faster later
-      let omnifocusTasks = {};
-      tasks.forEach((task) => {
-        const re = new RegExp(`^[A-Za-z0-9-]+`);
-        let taskId;
-        try {
-          taskId = task.name.match(re)[0];
-          if (!taskId) return;
-        } catch {
-          return;
-        }
-        omnifocusTasks[taskId] = task;
-        // Reset Jira Match Flag
-        omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
-      });
-
-      requestPromise.then((response) => {
-        let createdTasks = 0;
-        let checkedTickets = 0;
-        if (response.mimeType == "application/json") {
-          const jsonResponse = JSON.parse(response.bodyString);
-          // ADD THE TASKS
-
-
-          for (const issue of jsonResponse.issues) {
-            // Search if we need to add a new Task
-            checkedTickets++;
-            if (omnifocusTasks[issue.key]) {
-              // Make sure the task opens again
-              omnifocusTasks[issue.key].markIncomplete();
-              omnifocusTasks[issue.key].jiraToOmnifocusMatched = true;
-              continue;
-            }
-
-            // There was no Matching Task, so we create the Task
-            const taskName = issue.key + " " + issue.fields.summary;
-            const newTask = new Task(taskName, inbox.beginning);
-            const taskUrl = jiraUrl + "/browse/" + issue.key;
-            createdTasks++;
-
-            newTask.addTag(tag);
-            newTask.note =
-              taskUrl + "\n" + (issue.fields.description || "No description");
+        for (const issue of jsonResponse.issues) {
+          // Search if we need to add a new Task
+          checkedTickets++;
+          if (omnifocusTasks[issue.key]) {
+            // Make sure the task opens again
+            omnifocusTasks[issue.key].markIncomplete();
+            omnifocusTasks[issue.key].jiraToOmnifocusMatched = true;
+            continue;
           }
 
+          // There was no Matching Task, so we create the Task
+          const taskName = issue.key + " " + issue.fields.summary;
+          const newTask = new Task(taskName, inbox.beginning);
+          const taskUrl = jiraUrl + "/browse/" + issue.key;
+          createdTasks++;
 
-          //Close Tasks
-          for (const [task_id, task] of Object.entries(omnifocusTasks)) {
-            if (!task.jiraToOmnifocusMatched) {
-              var can_delete = true;
-
-              if (task.hasChildren) {
-                task.children.forEach(subtask => {
-                  if (!subtask.completed) {
-                    can_delete = false;
-                  }
-                });
-              }
-              if (can_delete) {
-                task.markComplete();
-              }
-            }
-          };
+          newTask.addTag(tag);
+          newTask.note =
+            taskUrl + "\n" + (issue.fields.description || "No description");
         }
-        console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks`);
-      });
 
-      requestPromise.catch((err) => {
-        console.log(`DEBUG: catch error ${err} `);
-      });
+
+        //Close Tasks
+        for (const [task_id, task] of Object.entries(omnifocusTasks)) {
+          if (!task.jiraToOmnifocusMatched) {
+            var can_delete = true;
+
+            if (task.hasChildren) {
+              task.children.forEach(subtask => {
+                if (!subtask.completed) {
+                  can_delete = false;
+                }
+              });
+            }
+            if (can_delete) {
+              task.markComplete();
+            }
+          }
+        };
+      }
+      console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks`);
     });
+
+    requestPromise.catch((err) => {
+      console.log(`DEBUG: catch error ${err} `);
+    });
+
 
   });
 
