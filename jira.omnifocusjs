@@ -9,134 +9,139 @@
   "shortLabel": "Jira: sync"
 }*/
 (() => {
-
-
   const maxResultsPerPage = 1000;
 
   // Configure Preferences
-  var preferences = new Preferences()
+  var preferences = new Preferences();
 
   const action = new PlugIn.Action(async function (selection, sender) {
+    console.log("Starting JIRA Sync...");
 
-    console.log("Starting JIRA Sync...")
-
-    incrementedCount = preferences.readNumber("incrementedCount")
+    incrementedCount = preferences.readNumber("incrementedCount");
     if (!incrementedCount) {
-      preferences.write("incrementedCount", 0)
-      incrementedCount = 0
+      preferences.write("incrementedCount", 0);
+      incrementedCount = 0;
     }
 
-    jiraUrl = preferences.readString("jiraUrl")
-    jiraUser = preferences.readString("jiraUser")
-    jiraAPIKey = preferences.readString("jiraAPIKey")
-    omniFocusTag = preferences.readString("omniFocusTag")
-    jiraQuery = preferences.readString("jiraQuery")
+    jiraUrl = preferences.readString("jiraUrl");
+    jiraUser = preferences.readString("jiraUser");
+    jiraAPIKey = preferences.readString("jiraAPIKey");
+    omniFocusTag = preferences.readString("omniFocusTag");
+    jiraQuery = preferences.readString("jiraQuery");
 
     try {
       // Hold down control keys to reset values
       if (app.controlKeyDown) {
-        console.log("Resetting Permissions")
+        console.log("Resetting Permissions");
 
-        let alertMessage = "Reset the stored count?"
-        alert = new Alert("Confirmation Required", alertMessage)
-        alert.addOption("Reset")
-        alert.addOption("Cancel")
-        buttonIndex = await alert.show()
+        let alertMessage = "Reset the stored count?";
+        alert = new Alert("Confirmation Required", alertMessage);
+        alert.addOption("Reset");
+        alert.addOption("Cancel");
+        buttonIndex = await alert.show();
 
         if (buttonIndex === 0) {
-          preferences.write("incrementedCount", 0)
-          return "user reset"
+          preferences.write("incrementedCount", 0);
+          return "user reset";
         }
-
       }
       if (incrementedCount === 0) {
-        defaultJiraUrl = ""
-        defaultJiraUser = ""
-        defaultJiraAPIKey = ""
-        defaultOmniFocusTag = "jira"
-        defaultjiraQuery = "assignee=currentuser() and resolution is empty"
+        defaultJiraUrl = "";
+        defaultJiraUser = "";
+        defaultJiraAPIKey = "";
+        defaultOmniFocusTag = "jira";
+        defaultjiraQuery = "assignee=currentuser() and resolution is empty";
 
-        if (!jiraUrl) { jiraUrl = defaultJiraUrl }
-        if (!jiraUser) { jiraUser = defaultJiraUser }
-        if (!jiraAPIKey) { jiraAPIKey = defaultJiraAPIKey }
-        if (!omniFocusTag) { omniFocusTag = defaultOmniFocusTag }
-        if (!jiraQuery) { jiraQuery = defaultjiraQuery }
+        if (!jiraUrl) {
+          jiraUrl = defaultJiraUrl;
+        }
+        if (!jiraUser) {
+          jiraUser = defaultJiraUser;
+        }
+        if (!jiraAPIKey) {
+          jiraAPIKey = defaultJiraAPIKey;
+        }
+        if (!omniFocusTag) {
+          omniFocusTag = defaultOmniFocusTag;
+        }
+        if (!jiraQuery) {
+          jiraQuery = defaultjiraQuery;
+        }
 
-        jiraUrlInputField = new Form.Field.String(
-          "jiraUrl",
-          "URL",
-          jiraUrl
-        )
+        jiraUrlInputField = new Form.Field.String("jiraUrl", "URL", jiraUrl);
 
         jiraUserInputField = new Form.Field.String(
           "jiraUser",
           "User",
           jiraUser
-        )
+        );
 
         jiraAPIKeyInputField = new Form.Field.String(
           "jiraAPIKey",
           "API Key",
           jiraAPIKey
-        )
+        );
 
         omniFocusTagInputField = new Form.Field.String(
           "omniFocusTag",
           "OmniFocus Tag",
           omniFocusTag
-        )
+        );
 
         jiraQueryInputField = new Form.Field.String(
           "jiraQuery",
           "JIRA Search Query",
           jiraQuery
-        )
+        );
 
-        inputForm = new Form()
-        inputForm.addField(jiraUrlInputField)
-        inputForm.addField(jiraUserInputField)
-        inputForm.addField(jiraAPIKeyInputField)
-        inputForm.addField(omniFocusTagInputField)
-        inputForm.addField(jiraQueryInputField)
+        inputForm = new Form();
+        inputForm.addField(jiraUrlInputField);
+        inputForm.addField(jiraUserInputField);
+        inputForm.addField(jiraAPIKeyInputField);
+        inputForm.addField(omniFocusTagInputField);
+        inputForm.addField(jiraQueryInputField);
         inputForm.validate = function (formobject) {
-          return true
-        }
+          return true;
+        };
 
-        formPrompt = "Enter values:"
-        buttonTitle = "Continue"
-        formobject = await inputForm.show(formPrompt, buttonTitle)
+        formPrompt = "Enter values:";
+        buttonTitle = "Continue";
+        formobject = await inputForm.show(formPrompt, buttonTitle);
 
-        jiraUrl = formobject.values['jiraUrl']
-        jiraUser = formobject.values['jiraUser']
-        jiraAPIKey = formobject.values['jiraAPIKey']
-        omniFocusTag = formobject.values['omniFocusTag']
-        jiraQuery = formobject.values['jiraQuery']
+        jiraUrl = formobject.values["jiraUrl"];
+        jiraUser = formobject.values["jiraUser"];
+        jiraAPIKey = formobject.values["jiraAPIKey"];
+        omniFocusTag = formobject.values["omniFocusTag"];
+        jiraQuery = formobject.values["jiraQuery"];
 
-        preferences.write("jiraUrl", jiraUrl)
-        preferences.write("jiraUser", jiraUser)
-        preferences.write("jiraAPIKey", jiraAPIKey)
-        preferences.write("omniFocusTag", omniFocusTag)
-        preferences.write("jiraQuery", jiraQuery)
+        preferences.write("jiraUrl", jiraUrl);
+        preferences.write("jiraUser", jiraUser);
+        preferences.write("jiraAPIKey", jiraAPIKey);
+        preferences.write("omniFocusTag", omniFocusTag);
+        preferences.write("jiraQuery", jiraQuery);
       }
-    }
-    catch (err) {
+    } catch (err) {
       if (!err.causedByUserCancelling) {
-        console.error(err.name, err.message)
+        console.error(err.name, err.message);
       }
     }
 
-    preferences.write("incrementedCount", incrementedCount + 1)
-    const urlParams = "/rest/api/latest/search?maxResults=" + maxResultsPerPage + "&jql=" + encodeURIComponent(jiraQuery);
+    preferences.write("incrementedCount", incrementedCount + 1);
+    const urlParams =
+      "/rest/api/latest/search?maxResults=" +
+      maxResultsPerPage +
+      "&jql=" +
+      encodeURIComponent(jiraQuery);
     const url = jiraUrl + urlParams;
     console.log("URL: ", url);
 
     const request = URL.FetchRequest.fromString(url);
     request.method = "GET";
-    var data = Data.fromString(jiraUser + ":" + jiraAPIKey)
+    var data = Data.fromString(jiraUser + ":" + jiraAPIKey);
     const authHeader = "Basic " + data.toBase64();
 
     request.headers = { Authorization: authHeader };
-    const requestPromise = request.fetch()
+    const requestPromise = request.fetch();
 
     // Find the tag
     let tag = null;
@@ -162,7 +167,7 @@
         currentTag &&
         i === parsedOmnifocusTagToUse.length &&
         currentTag.name ===
-        parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
+          parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
       ) {
         tag = currentTag;
       }
@@ -197,17 +202,14 @@
     });
 
     requestPromise.then((response) => {
-
       let createdTasks = 0;
       let checkedTickets = 0;
       if (response.mimeType == "application/json") {
         const jsonResponse = JSON.parse(response.bodyString);
 
-        console.log("start", jsonResponse.startAt)
-        console.log("maxResults", jsonResponse.maxResults)
-        console.log("total", jsonResponse.total)
-
-
+        console.log("start", jsonResponse.startAt);
+        console.log("maxResults", jsonResponse.maxResults);
+        console.log("total", jsonResponse.total);
 
         for (const issue of jsonResponse.issues) {
           // Search if we need to add a new Task
@@ -230,14 +232,13 @@
             taskUrl + "\n" + (issue.fields.description || "No description");
         }
 
-
         //Close Tasks
         for (const [task_id, task] of Object.entries(omnifocusTasks)) {
           if (!task.jiraToOmnifocusMatched) {
             var can_delete = true;
 
             if (task.hasChildren) {
-              task.children.forEach(subtask => {
+              task.children.forEach((subtask) => {
                 if (!subtask.completed) {
                   can_delete = false;
                 }
@@ -247,17 +248,17 @@
               task.markComplete();
             }
           }
-        };
+        }
       }
 
-      console.log(`NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks`);
+      console.log(
+        `NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks`
+      );
     });
 
     requestPromise.catch((err) => {
       console.log(`DEBUG: catch error ${err} `);
     });
-
-
   });
 
   action.validate = function (selection, sender) {
