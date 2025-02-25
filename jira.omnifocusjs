@@ -3,7 +3,7 @@
   "targets": ["omnifocus"],
   "author": "Mark E. Schill",
   "identifier": "net.cmschill.omnifocus.sync.jira",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Sync elements from Jira with Omnifocus",
   "label": "🔹 Jira: Sync",
   "shortLabel": "Jira: sync"
