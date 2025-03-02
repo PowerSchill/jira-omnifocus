@@ -23,23 +23,28 @@
     var credentialsObj = credentials.read(serviceTitle);
 
     if (app.controlKeyDown) {
-      alertMessage = "Remove the stored credentials?";
-      alert = new Alert("Confirmation Required", alertMessage);
+      // Prompt the user to confirm the removal of stored credentials
+      const alertMessage = "Remove the stored credentials?";
+      const alert = new Alert("Confirmation Required", alertMessage);
       alert.addOption("Reset");
       alert.addOption("Cancel");
-      buttonIndex = await alert.show();
+
+      // Show the alert and get the user's response
+      const buttonIndex = await alert.show();
+
+      // If the user chose "Reset", remove the stored credentials
       if (buttonIndex === 0) {
         credentials.remove(serviceTitle);
       }
     } else if (!credentialsObj) {
       inputForm = new Form();
 
-      userIDField = new Form.Field.String("userID", "User ID", null);
+      const userIDField = new Form.Field.String("userID", "User ID", null);
       if (Device.iPad || Device.iOS) {
         userIDField.autocapitalizationType = TextAutocapitalizationType.None;
       }
 
-      APIKeyField = new Form.Field.String("apiKey", "API Key", null);
+      const APIKeyField = new Form.Field.String("apiKey", "API Key", null);
       if (Device.iPad || Device.iOS) {
         APIKeyField.autocapitalizationType = TextAutocapitalizationType.None;
       }
@@ -48,23 +53,22 @@
       inputForm.addField(APIKeyField);
 
       inputForm.validate = (formObject) => {
-        userID = formObject.values["userID"];
-        APIKey = formObject.values["apiKey"];
-        validation = userID && APIKey ? true : false;
-        return validation;
+        const userID = formObject.values["userID"];
+        const APIKey = formObject.values["apiKey"];
+        return userID && APIKey ? true : false;
       };
 
-      formPrompt = "Enter your JIRA credentials:";
-      formObject = await inputForm.show(formPrompt, "Continue");
+      const formPrompt = "Enter your JIRA credentials:";
+      const formObject = await inputForm.show(formPrompt, "Continue");
 
-      userID = formObject.values["userID"];
-      apiKey = formObject.values["apiKey"];
+      const userID = formObject.values["userID"];
+      const apiKey = formObject.values["apiKey"];
 
       credentials.write(serviceTitle, userID, apiKey);
     } else {
       try {
-        var userID = credentialsObj["userID"];
-        var apiKey = credentialsObj["apiKey"];
+        var userID = credentialsObj.user;
+        var apiKey = credentialsObj.password;
 
         if (shouldLogToConsole) {
           console.log("User ID:", userID);
@@ -117,24 +121,6 @@
           console.log("JIRA Query:", jiraQuery);
         }
 
-        // Begin the actual work
-
-        const urlParams =
-          "/rest/api/latest/search?maxResults=" +
-          maxResultsPerPage +
-          "&jql=" +
-          encodeURIComponent(jiraQuery);
-        const url = jiraUrl + urlParams;
-        console.log("URL: ", url);
-
-        const request = URL.FetchRequest.fromString(url);
-        request.method = "GET";
-        var data = Data.fromString(jiraUser + ":" + jiraAPIKey);
-        const authHeader = "Basic " + data.toBase64();
-
-        request.headers = { Authorization: authHeader };
-        const requestPromise = request.fetch();
-
         // Find the tag
         let tag = null;
 
@@ -142,35 +128,33 @@
         const parsedOmnifocusTagToUse = omniFocusTag.split(" : ");
         if (parsedOmnifocusTagToUse.length > 1) {
           let currentTag = null;
-          let i;
-          for (i = 0; i < parsedOmnifocusTagToUse.length; i++) {
-            let newTag;
-            if (currentTag) {
-              newTag = currentTag.childNamed(parsedOmnifocusTagToUse[i]);
-            } else {
-              newTag = tags.byName(parsedOmnifocusTagToUse[i]);
-            }
+          for (let i = 0; i < parsedOmnifocusTagToUse.length; i++) {
+            let newTag = currentTag
+              ? currentTag.childNamed(parsedOmnifocusTagToUse[i])
+              : tags.byName(parsedOmnifocusTagToUse[i]);
+
             if (!newTag) break;
             currentTag = newTag;
           }
 
-          // after all ran, check if its a success, then apply tag
+          // Check if the tag was successfully found and apply it
           if (
             currentTag &&
-            i === parsedOmnifocusTagToUse.length &&
             currentTag.name ===
               parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
           ) {
             tag = currentTag;
           }
         }
+
         if (!tag) {
-          // if tag is not found yet
+          // If tag is not found yet, try to find or create it
           tag =
             tags.byName(omniFocusTag) ||
             flattenedTags.byName(omniFocusTag) ||
             new Tag(omniFocusTag);
         }
+
         if (!tag) {
           console.error(new Error("could not create tag"));
           return;
@@ -193,6 +177,22 @@
           omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
         });
 
+        // Begin the actual work
+
+        const urlParams = `/rest/api/latest/search?maxResults=${maxResultsPerPage}&jql=${encodeURIComponent(
+          jiraQuery
+        )}`;
+        const url = jiraUrl + urlParams;
+        console.log("URL: ", url);
+
+        const request = URL.FetchRequest.fromString(url);
+        request.method = "GET";
+        const data = Data.fromString(userID + ":" + APIKey);
+        const authHeader = "Basic " + data.toBase64();
+
+        request.headers = { Authorization: authHeader };
+        const requestPromise = request.fetch();
+
         requestPromise.then((response) => {
           let createdTasks = 0;
           let checkedTickets = 0;
@@ -206,37 +206,41 @@
             for (const issue of jsonResponse.issues) {
               // Search if we need to add a new Task
               checkedTickets++;
-              if (omnifocusTasks[issue.key]) {
+              const existingTask = omnifocusTasks[issue.key];
+              if (existingTask) {
                 // Make sure the task opens again
-                omnifocusTasks[issue.key].markIncomplete();
-                omnifocusTasks[issue.key].jiraToOmnifocusMatched = true;
+                existingTask.markIncomplete();
+                existingTask.jiraToOmnifocusMatched = true;
                 continue;
               }
 
               // There was no Matching Task, so we create the Task
-              const taskName = issue.key + " " + issue.fields.summary;
+              const taskName = `${issue.key} ${issue.fields.summary}`;
               const newTask = new Task(taskName, inbox.beginning);
-              const taskUrl = jiraUrl + "/browse/" + issue.key;
+              const taskUrl = `${jiraUrl}/browse/${issue.key}`;
               createdTasks++;
 
               newTask.addTag(tag);
-              newTask.note =
-                taskUrl + "\n" + (issue.fields.description || "No description");
+              newTask.note = `${taskUrl}\n${
+                issue.fields.description || "No description"
+              }`;
             }
 
             //Close Tasks
             for (const [task_id, task] of Object.entries(omnifocusTasks)) {
               if (!task.jiraToOmnifocusMatched) {
-                var can_delete = true;
+                let canDelete = true;
 
                 if (task.hasChildren) {
-                  task.children.forEach((subtask) => {
+                  for (const subtask of task.children) {
                     if (!subtask.completed) {
-                      can_delete = false;
+                      canDelete = false;
+                      break;
                     }
-                  });
+                  }
                 }
-                if (can_delete) {
+
+                if (canDelete) {
                   task.markComplete();
                 }
               }
