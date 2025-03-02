@@ -3,7 +3,7 @@ commitizen:
   name: cz_conventional_commits
   tag_format: v$version
   update_changelog_on_bump: true
-  version: 2.0.0-alpha.0
+  version: 1.4.0
   version_files:
-  - jira.omnifocusjs:version
+    - jira.omnifocusjs:version
   version_scheme: semver2
