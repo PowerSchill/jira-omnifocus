@@ -171,7 +171,22 @@
           omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
         });
 
-        // Begin the actual work
+        // Validate API Key
+        const validateUrl = jiraUrl + "/rest/api/3/myself";
+        const validateRequest = URL.FetchRequest.fromString(validateUrl);
+        validateRequest.method = "GET";
+        const validateAuth = Data.fromString(userID + ":" + apiKey).toBase64();
+        validateRequest.headers = { Authorization: "Basic " + validateAuth };
+        const validateResponse = await validateRequest.fetch();
+        if (validateResponse.statusCode !== 200) {
+          throw new Error("JIRA API Key is invalid or expired.");
+        }
+        const validateJson = JSON.parse(validateResponse.bodyString);
+        if (validateJson.apiKey && validateJson.apiKey.expiry) {
+          console.log("API Key Expiration:", validateJson.apiKey.expiry);
+        } else {
+          console.log("API Key is valid. Expiration date not provided by Jira.");
+        }
 
         const fetchJiraIssues = async (startAt = 0) => {
           const urlParams = `/rest/api/latest/search?maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
