@@ -174,7 +174,7 @@
         // Begin the actual work
 
         const fetchJiraIssues = async (startAt = 0) => {
-          const urlParams = `/rest/api/latest/search?maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
+          const urlParams = `/rest/api/3/search?maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
             jiraQuery
           )}`;
           const url = jiraUrl + urlParams;
