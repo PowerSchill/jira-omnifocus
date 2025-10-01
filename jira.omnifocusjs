@@ -205,7 +205,9 @@
             console.log("maxResults", jsonResponse.maxResults);
             console.log("total", jsonResponse.total);
 
-            for (const issue of jsonResponse.issues) {
+            // The new API uses 'values' instead of 'issues'
+            const issues = jsonResponse.values || jsonResponse.issues || [];
+            for (const issue of issues) {
               // Search if we need to add a new Task
               checkedTickets++;
               const existingTask = omnifocusTasks[issue.key];
