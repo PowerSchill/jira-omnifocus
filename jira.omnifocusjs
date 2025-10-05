@@ -3,7 +3,7 @@
   "targets": ["omnifocus"],
   "author": "Mark E. Schill",
   "identifier": "net.cmschill.omnifocus.sync.jira",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Sync elements from Jira with Omnifocus",
   "label": "🔹 Jira: Sync",
   "shortLabel": "Jira: sync"
@@ -185,10 +185,12 @@
         if (validateJson.apiKey && validateJson.apiKey.expiry) {
           console.log("API Key Expiration:", validateJson.apiKey.expiry);
         } else {
-          console.log("API Key is valid. Expiration date not provided by Jira.");
+          console.log(
+            "API Key is valid. Expiration date not provided by Jira."
+          );
         }
 
-        const jiraFields = ["key", "summary", "description"]
+        const jiraFields = ["key", "summary", "description"];
 
         const fetchJiraIssues = async (startAt = 0) => {
           const urlParams = `/rest/api/3/search/jql?fields=${jiraFields}&maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
@@ -210,7 +212,10 @@
 
             // Check for API errors
             if (jsonResponse.errorMessages || jsonResponse.errors) {
-              console.error("API Error Response:", JSON.stringify(jsonResponse, null, 2));
+              console.error(
+                "API Error Response:",
+                JSON.stringify(jsonResponse, null, 2)
+              );
               throw new Error(
                 jsonResponse.errorMessages
                   ? jsonResponse.errorMessages.join(", ")
