@@ -188,8 +188,10 @@
           console.log("API Key is valid. Expiration date not provided by Jira.");
         }
 
+        const jiraFields = ["key", "summary", "description"]
+
         const fetchJiraIssues = async (startAt = 0) => {
-          const urlParams = `/rest/api/latest/search?maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
+          const urlParams = `/rest/api/3/search/jql?fields=${jiraFields}&maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
             jiraQuery
           )}`;
           const url = jiraUrl + urlParams;
@@ -206,11 +208,23 @@
           if (response.mimeType == "application/json") {
             const jsonResponse = JSON.parse(response.bodyString);
 
+            // Check for API errors
+            if (jsonResponse.errorMessages || jsonResponse.errors) {
+              console.error("API Error Response:", JSON.stringify(jsonResponse, null, 2));
+              throw new Error(
+                jsonResponse.errorMessages
+                  ? jsonResponse.errorMessages.join(", ")
+                  : "API returned an error"
+              );
+            }
+
             console.log("start", jsonResponse.startAt);
             console.log("maxResults", jsonResponse.maxResults);
             console.log("total", jsonResponse.total);
 
-            for (const issue of jsonResponse.issues) {
+            // The new API uses 'values' instead of 'issues'
+            const issues = jsonResponse.values || jsonResponse.issues || [];
+            for (const issue of issues) {
               // Search if we need to add a new Task
               checkedTickets++;
               const existingTask = omnifocusTasks[issue.key];
