@@ -157,11 +157,11 @@
 
         // cache object instead of array so search will be faster later
         let omnifocusTasks = {};
+        const jiraKeyRegex = new RegExp(`^[A-Z][A-Z0-9]+-\\d+`);
         tasks.forEach((task) => {
-          const re = new RegExp(`^[A-Za-z0-9-]+`);
           let taskId;
           try {
-            taskId = task.name.match(re)[0];
+            taskId = task.name.match(jiraKeyRegex)[0];
             if (!taskId) return;
           } catch {
             return;
