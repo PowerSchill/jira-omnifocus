@@ -315,7 +315,7 @@
         // Show summary alert only if changes were made
         const totalChanges = syncStats.created + syncStats.reopened + syncStats.completed;
         if (totalChanges > 0) {
-          const summaryLines = ["Jira Sync Complete\n"];
+          const summaryLines = [];
           if (syncStats.created > 0) {
             summaryLines.push(`✨ Created: ${syncStats.created} task${syncStats.created !== 1 ? "s" : ""}`);
           }
@@ -328,7 +328,7 @@
           summaryLines.push(`\nTotal time: ${syncDuration}s`);
 
           const summary = summaryLines.join("\n");
-          await new Alert("Sync Complete", summary).show();
+          await new Alert("Jira Sync", summary).show();
         }
       } catch (err) {
         if (!err.message.includes("cancelled")) {
