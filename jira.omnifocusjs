@@ -67,6 +67,16 @@
       credentials.write(serviceTitle, userID, apiKey);
     } else {
       try {
+        // Start timing the sync
+        const syncStartTime = Date.now();
+
+        // Initialize sync statistics
+        const syncStats = {
+          created: 0,
+          reopened: 0,
+          completed: 0
+        };
+
         var userID = credentialsObj.user;
         var apiKey = credentialsObj.password;
 
@@ -234,8 +244,13 @@
               checkedTickets++;
               const existingTask = omnifocusTasks[issue.key];
               if (existingTask) {
+                // Track if task was completed before reopening
+                const wasCompleted = existingTask.completed;
                 // Make sure the task opens again
                 existingTask.markIncomplete();
+                if (wasCompleted) {
+                  syncStats.reopened++;
+                }
                 existingTask.jiraToOmnifocusMatched = true;
                 continue;
               }
@@ -244,7 +259,7 @@
               const taskName = `${issue.key} ${issue.fields.summary}`;
               const newTask = new Task(taskName, inbox.beginning);
               const taskUrl = `${jiraUrl}/browse/${issue.key}`;
-              createdTasks++;
+              syncStats.created++;
 
               newTask.addTag(tag);
               newTask.note = `${taskUrl}\n${
@@ -264,7 +279,6 @@
           }
         };
 
-        let createdTasks = 0;
         let checkedTickets = 0;
 
         await fetchJiraIssues();
@@ -285,13 +299,37 @@
 
             if (canDelete) {
               task.markComplete();
+              syncStats.completed++;
             }
           }
         }
 
+        // Calculate sync duration
+        const syncDuration = ((Date.now() - syncStartTime) / 1000).toFixed(1);
+
+        // Log to console
         console.log(
-          `NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${createdTasks} new tasks`
+          `NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${syncStats.created} new tasks, Reopened ${syncStats.reopened} tasks, Completed ${syncStats.completed} tasks (${syncDuration}s)`
         );
+
+        // Show summary alert only if changes were made
+        const totalChanges = syncStats.created + syncStats.reopened + syncStats.completed;
+        if (totalChanges > 0) {
+          const summaryLines = [];
+          if (syncStats.created > 0) {
+            summaryLines.push(`✨ Created: ${syncStats.created} task${syncStats.created !== 1 ? "s" : ""}`);
+          }
+          if (syncStats.reopened > 0) {
+            summaryLines.push(`🔄 Reopened: ${syncStats.reopened} task${syncStats.reopened !== 1 ? "s" : ""}`);
+          }
+          if (syncStats.completed > 0) {
+            summaryLines.push(`✓ Completed: ${syncStats.completed} task${syncStats.completed !== 1 ? "s" : ""}`);
+          }
+          summaryLines.push(`\nTotal time: ${syncDuration}s`);
+
+          const summary = summaryLines.join("\n");
+          await new Alert("Jira Sync", summary).show();
+        }
       } catch (err) {
         if (!err.message.includes("cancelled")) {
           new Alert(err.name, err.message).show();
