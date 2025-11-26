@@ -30,6 +30,7 @@
    * @returns {string|null} The ticket key (e.g., "PROJ-123") or null if not found
    */
   const extractTicketKey = (taskName) => {
+    if (!taskName) return null;
     const jiraKeyRegex = /^[A-Z][A-Z0-9]+-\d+/;
     const match = taskName.match(jiraKeyRegex);
     return match ? match[0] : null;
@@ -42,6 +43,9 @@
    * @throws {Error} If tag cannot be created
    */
   const findOrCreateTag = (tagPath) => {
+    if (!tagPath) {
+      throw new Error("Tag path is required");
+    }
     let tag = null;
 
     // If user gave an absolute path, parse it and process it
@@ -90,6 +94,9 @@
    * @throws {Error} If validation fails
    */
   const validateJiraConnection = async (jiraUrl, userID, apiKey) => {
+    if (!jiraUrl || !userID || !apiKey) {
+      throw new Error("JIRA URL, User ID, and API Key are required");
+    }
     const validateUrl = jiraUrl + "/rest/api/3/myself";
     const validateRequest = URL.FetchRequest.fromString(validateUrl);
     validateRequest.method = "GET";
