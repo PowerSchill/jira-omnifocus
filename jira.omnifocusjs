@@ -12,13 +12,106 @@
   const maxResultsPerPage = 25;
 
   var shouldLogToConsole = true;
+
+  /**
+   * Consolidated logging helper
+   * @param {string} message - The message to log
+   * @param {...any} args - Additional arguments to log
+   */
+  const log = (message, ...args) => {
+    if (shouldLogToConsole) {
+      console.log(message, ...args);
+    }
+  };
+
+  /**
+   * Extract Jira ticket key from task name
+   * @param {string} taskName - The task name to extract key from
+   * @returns {string|null} The ticket key (e.g., "PROJ-123") or null if not found
+   */
+  const extractTicketKey = (taskName) => {
+    const jiraKeyRegex = /^[A-Z][A-Z0-9]+-\d+/;
+    const match = taskName.match(jiraKeyRegex);
+    return match ? match[0] : null;
+  };
+
+  /**
+   * Find or create a tag by path
+   * @param {string} tagPath - The tag path (can be "tag" or "Parent : Child")
+   * @returns {Tag} The found or created tag
+   * @throws {Error} If tag cannot be created
+   */
+  const findOrCreateTag = (tagPath) => {
+    let tag = null;
+
+    // If user gave an absolute path, parse it and process it
+    const parsedTagPath = tagPath.split(" : ");
+    if (parsedTagPath.length > 1) {
+      let currentTag = null;
+      for (let i = 0; i < parsedTagPath.length; i++) {
+        let newTag = currentTag
+          ? currentTag.childNamed(parsedTagPath[i])
+          : tags.byName(parsedTagPath[i]);
+
+        if (!newTag) break;
+        currentTag = newTag;
+      }
+
+      // Check if the tag was successfully found and apply it
+      if (
+        currentTag &&
+        currentTag.name === parsedTagPath[parsedTagPath.length - 1]
+      ) {
+        tag = currentTag;
+      }
+    }
+
+    if (!tag) {
+      // If tag is not found yet, try to find or create it
+      tag =
+        tags.byName(tagPath) ||
+        flattenedTags.byName(tagPath) ||
+        new Tag(tagPath);
+    }
+
+    if (!tag) {
+      throw new Error("Could not find or create tag: " + tagPath);
+    }
+
+    return tag;
+  };
+
+  /**
+   * Validate Jira API connection
+   * @param {string} jiraUrl - The Jira base URL
+   * @param {string} userID - The user ID for authentication
+   * @param {string} apiKey - The API key for authentication
+   * @returns {Promise<Object>} The validation response JSON
+   * @throws {Error} If validation fails
+   */
+  const validateJiraConnection = async (jiraUrl, userID, apiKey) => {
+    const validateUrl = jiraUrl + "/rest/api/3/myself";
+    const validateRequest = URL.FetchRequest.fromString(validateUrl);
+    validateRequest.method = "GET";
+    const validateAuth = Data.fromString(userID + ":" + apiKey).toBase64();
+    validateRequest.headers = { Authorization: "Basic " + validateAuth };
+    const validateResponse = await validateRequest.fetch();
+    if (validateResponse.statusCode !== 200) {
+      throw new Error("JIRA API Key is invalid or expired.");
+    }
+    const validateJson = JSON.parse(validateResponse.bodyString);
+    if (validateJson.apiKey && validateJson.apiKey.expiry) {
+      log("API Key Expiration:", validateJson.apiKey.expiry);
+    } else {
+      log("API Key is valid. Expiration date not provided by Jira.");
+    }
+    return validateJson;
+  };
   var serviceTitle = "JIRA Sync";
   var credentials = new Credentials();
   var preferences = new Preferences();
   var action = new PlugIn.Action(async function (selection, sender) {
-    if (shouldLogToConsole) {
-      console.log("Starting JIRA Sync...");
-    }
+    log("Starting JIRA Sync...");
 
     var credentialsObj = credentials.read(serviceTitle);
 
@@ -80,10 +173,8 @@
         var userID = credentialsObj.user;
         var apiKey = credentialsObj.password;
 
-        if (shouldLogToConsole) {
-          console.log("User ID:", userID);
-          console.log("API Key:", apiKey);
-        }
+        log("User ID:", userID);
+        log("API Key:", apiKey);
 
         jiraUrl =
           preferences.readString("jiraUrl") || "https://jira.atlassian.com";
@@ -119,86 +210,26 @@
         var jiraQuery = formObject.values["jiraQuery"];
         preferences.write("jiraQuery", jiraQuery);
 
-        if (shouldLogToConsole) {
-          console.log("JIRA URL:", jiraUrl);
-          console.log("OmniFocus Tag:", omniFocusTag);
-          console.log("JIRA Query:", jiraQuery);
-        }
+        log("JIRA URL:", jiraUrl);
+        log("OmniFocus Tag:", omniFocusTag);
+        log("JIRA Query:", jiraQuery);
 
-        // Find the tag
-        let tag = null;
-
-        // If user gave an absolute path, parse it and process it
-        const parsedOmnifocusTagToUse = omniFocusTag.split(" : ");
-        if (parsedOmnifocusTagToUse.length > 1) {
-          let currentTag = null;
-          for (let i = 0; i < parsedOmnifocusTagToUse.length; i++) {
-            let newTag = currentTag
-              ? currentTag.childNamed(parsedOmnifocusTagToUse[i])
-              : tags.byName(parsedOmnifocusTagToUse[i]);
-
-            if (!newTag) break;
-            currentTag = newTag;
-          }
-
-          // Check if the tag was successfully found and apply it
-          if (
-            currentTag &&
-            currentTag.name ===
-              parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
-          ) {
-            tag = currentTag;
-          }
-        }
-
-        if (!tag) {
-          // If tag is not found yet, try to find or create it
-          tag =
-            tags.byName(omniFocusTag) ||
-            flattenedTags.byName(omniFocusTag) ||
-            new Tag(omniFocusTag);
-        }
-
-        if (!tag) {
-          console.error(new Error("could not create tag"));
-          return;
-        }
+        // Find or create the tag
+        const tag = findOrCreateTag(omniFocusTag);
         const tasks = tag.tasks;
 
         // cache object instead of array so search will be faster later
         let omnifocusTasks = {};
-        const jiraKeyRegex = new RegExp(`^[A-Z][A-Z0-9]+-\\d+`);
         tasks.forEach((task) => {
-          let taskId;
-          try {
-            taskId = task.name.match(jiraKeyRegex)[0];
-            if (!taskId) return;
-          } catch {
-            return;
-          }
+          const taskId = extractTicketKey(task.name);
+          if (!taskId) return;
           omnifocusTasks[taskId] = task;
           // Reset Jira Match Flag
           omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
         });
 
         // Validate API Key
-        const validateUrl = jiraUrl + "/rest/api/3/myself";
-        const validateRequest = URL.FetchRequest.fromString(validateUrl);
-        validateRequest.method = "GET";
-        const validateAuth = Data.fromString(userID + ":" + apiKey).toBase64();
-        validateRequest.headers = { Authorization: "Basic " + validateAuth };
-        const validateResponse = await validateRequest.fetch();
-        if (validateResponse.statusCode !== 200) {
-          throw new Error("JIRA API Key is invalid or expired.");
-        }
-        const validateJson = JSON.parse(validateResponse.bodyString);
-        if (validateJson.apiKey && validateJson.apiKey.expiry) {
-          console.log("API Key Expiration:", validateJson.apiKey.expiry);
-        } else {
-          console.log(
-            "API Key is valid. Expiration date not provided by Jira."
-          );
-        }
+        await validateJiraConnection(jiraUrl, userID, apiKey);
 
         const jiraFields = ["key", "summary", "description"];
 
@@ -207,7 +238,7 @@
             jiraQuery
           )}`;
           const url = jiraUrl + urlParams;
-          console.log("URL: ", url);
+          log("URL: ", url);
 
           const request = URL.FetchRequest.fromString(url);
           request.method = "GET";
@@ -233,9 +264,9 @@
               );
             }
 
-            console.log("start", jsonResponse.startAt);
-            console.log("maxResults", jsonResponse.maxResults);
-            console.log("total", jsonResponse.total);
+            log("start", jsonResponse.startAt);
+            log("maxResults", jsonResponse.maxResults);
+            log("total", jsonResponse.total);
 
             // The new API uses 'values' instead of 'issues'
             const issues = jsonResponse.values || jsonResponse.issues || [];
@@ -308,7 +339,7 @@
         const syncDuration = ((Date.now() - syncStartTime) / 1000).toFixed(1);
 
         // Log to console
-        console.log(
+        log(
           `NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${syncStats.created} new tasks, Reopened ${syncStats.reopened} tasks, Completed ${syncStats.completed} tasks (${syncDuration}s)`
         );
 
