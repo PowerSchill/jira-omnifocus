@@ -3,7 +3,7 @@
   "targets": ["omnifocus"],
   "author": "Mark E. Schill",
   "identifier": "net.cmschill.omnifocus.sync.jira",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Sync elements from Jira with Omnifocus",
   "label": "🔹 Jira: Sync",
   "shortLabel": "Jira: sync"
@@ -333,6 +333,43 @@
         log("OmniFocus Tag:", omniFocusTag);
         log("JIRA Query:", jiraQuery);
 
+        // Incremental sync: Determine if we need a full sync or incremental sync
+        const lastSyncTime = preferences.readDate("lastSyncTime");
+        const lastJiraQuery = preferences.readString("lastJiraQuery");
+        const forceFullSync = app.optionKeyDown; // Hold Option key to force full sync
+        
+        // Determine if this should be a full sync
+        const isFullSync = forceFullSync || !lastSyncTime || lastJiraQuery !== jiraQuery;
+        
+        let effectiveJiraQuery = jiraQuery;
+        let syncType = "full";
+        
+        if (!isFullSync) {
+          // Incremental sync: only fetch tickets updated since last sync
+          // Note: Jira API expects ISO 8601 format with +0000 (UTC) timezone
+          const lastSyncISO = lastSyncTime.toISOString().split(".")[0] + "+0000";
+          
+          // Extract ORDER BY clause if present (must be at the end of JQL)
+          const orderByMatch = jiraQuery.match(/\s+ORDER\s+BY\s+.+$/i);
+          const orderByClause = orderByMatch ? orderByMatch[0] : "";
+          const queryWithoutOrderBy = orderByClause ? jiraQuery.slice(0, -orderByClause.length).trim() : jiraQuery;
+          
+          // Add time filter and re-append ORDER BY at the end
+          effectiveJiraQuery = `(${queryWithoutOrderBy}) AND updated >= "${lastSyncISO}"${orderByClause}`;
+          syncType = "incremental";
+          log("Incremental sync: fetching tickets updated since", lastSyncTime.toISOString());
+        } else {
+          if (forceFullSync) {
+            log("Full sync: forced by user (Option key held)");
+          } else if (!lastSyncTime) {
+            log("Full sync: first sync (no previous sync time)");
+          } else if (lastJiraQuery !== jiraQuery) {
+            log("Full sync: JQL query changed");
+          }
+        }
+        
+        log("Effective JIRA Query:", effectiveJiraQuery);
+
         // Find the tag
         const tag = getOrCreateTagFromPath(omniFocusTag);
 
@@ -366,7 +403,7 @@
 
         const fetchJiraIssues = async (startAt = 0) => {
           const urlParams = `/rest/api/3/search/jql?fields=${jiraFields}&maxResults=${maxResultsPerPage}&startAt=${startAt}&jql=${encodeURIComponent(
-            jiraQuery
+            effectiveJiraQuery
           )}`;
           const url = jiraUrl + urlParams;
           log("URL:", url);
@@ -454,9 +491,13 @@
         // Calculate sync duration
         const syncDuration = ((Date.now() - syncStartTime) / 1000).toFixed(1);
 
+        // Update preferences after successful sync
+        preferences.write("lastSyncTime", new Date());
+        preferences.write("lastJiraQuery", jiraQuery);
+
         // Log to console
         console.log(
-          `NOTICE: Synced ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${syncStats.created} new tasks, Reopened ${syncStats.reopened} tasks, Completed ${syncStats.completed} tasks (${syncDuration}s)`
+          `NOTICE: ${syncType === "incremental" ? "Incremental" : "Full"} sync completed for ${jiraUrl}. Checked ${checkedTickets} Tickets, Created ${syncStats.created} new tasks, Reopened ${syncStats.reopened} tasks, Completed ${syncStats.completed} tasks (${syncDuration}s)`
         );
 
         // Show summary alert only if changes were made
@@ -464,6 +505,9 @@
           syncStats.created + syncStats.reopened + syncStats.completed;
         if (totalChanges > 0) {
           const summaryLines = [];
+          summaryLines.push(
+            `🔄 Sync Type: ${syncType === "incremental" ? "Incremental ⚡" : "Full 🔍"}`
+          );
           if (syncStats.created > 0) {
             summaryLines.push(
               `✨ Created: ${syncStats.created} task${
