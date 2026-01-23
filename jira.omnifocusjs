@@ -348,7 +348,14 @@
           // Incremental sync: only fetch tickets updated since last sync
           // Note: Jira API expects ISO 8601 format with +0000 (UTC) timezone
           const lastSyncISO = lastSyncTime.toISOString().split(".")[0] + "+0000";
-          effectiveJiraQuery = `(${jiraQuery}) AND updated >= "${lastSyncISO}"`;
+          
+          // Extract ORDER BY clause if present (must be at the end of JQL)
+          const orderByMatch = jiraQuery.match(/\s+ORDER\s+BY\s+.+$/i);
+          const orderByClause = orderByMatch ? orderByMatch[0] : "";
+          const queryWithoutOrderBy = orderByClause ? jiraQuery.slice(0, -orderByClause.length).trim() : jiraQuery;
+          
+          // Add time filter and re-append ORDER BY at the end
+          effectiveJiraQuery = `(${queryWithoutOrderBy}) AND updated >= "${lastSyncISO}"${orderByClause}`;
           syncType = "incremental";
           log("Incremental sync: fetching tickets updated since", lastSyncTime.toISOString());
         } else {
