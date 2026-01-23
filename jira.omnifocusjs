@@ -344,8 +344,9 @@
         let effectiveJiraQuery = jiraQuery;
         let syncType = "full";
         
-        if (!isFullSync && lastSyncTime) {
+        if (!isFullSync) {
           // Incremental sync: only fetch tickets updated since last sync
+          // Note: Jira API expects ISO 8601 format with +0000 (UTC) timezone
           const lastSyncISO = lastSyncTime.toISOString().split(".")[0] + "+0000";
           effectiveJiraQuery = `(${jiraQuery}) AND updated >= "${lastSyncISO}"`;
           syncType = "incremental";
