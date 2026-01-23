@@ -11,16 +11,221 @@
 (() => {
   const maxResultsPerPage = 25;
 
-  var shouldLogToConsole = true;
-  var serviceTitle = "JIRA Sync";
-  var credentials = new Credentials();
-  var preferences = new Preferences();
-  var action = new PlugIn.Action(async function (selection, sender) {
+  const shouldLogToConsole = true;
+  const serviceTitle = "JIRA Sync";
+  const credentials = new Credentials();
+  const preferences = new Preferences();
+
+  const log = (...args) => {
+    if (shouldLogToConsole) console.log(...args);
+  };
+
+  const isSuccessfulStatus = (statusCode) =>
+    typeof statusCode === "number" && statusCode >= 200 && statusCode < 300;
+
+  const getBasicAuthHeader = (userID, apiKey) =>
+    "Basic " + Data.fromString(userID + ":" + apiKey).toBase64();
+
+  const parseJsonSafely = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+
+  const formatJiraError = (statusCode, bodyString) => {
+    const json = parseJsonSafely(bodyString);
+    if (json) {
+      const messageParts = [];
+      if (Array.isArray(json.errorMessages) && json.errorMessages.length) {
+        messageParts.push(json.errorMessages.join(", "));
+      }
+      if (json.errors && typeof json.errors === "object") {
+        const kv = Object.entries(json.errors)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        if (kv) messageParts.push(kv);
+      }
+      const msg = messageParts.filter(Boolean).join(" | ");
+      if (msg) return `Jira request failed (HTTP ${statusCode}): ${msg}`;
+    }
+
+    const snippet =
+      typeof bodyString === "string" && bodyString.trim().length
+        ? bodyString.trim().slice(0, 500)
+        : "";
+    return snippet
+      ? `Jira request failed (HTTP ${statusCode}): ${snippet}`
+      : `Jira request failed (HTTP ${statusCode}).`;
+  };
+
+  const fetchJiraJson = async ({ url, authHeader }) => {
+    const request = URL.FetchRequest.fromString(url);
+    request.method = "GET";
+    request.headers = {
+      Authorization: authHeader,
+      Accept: "application/json"
+    };
+
+    const response = await request.fetch();
+    const statusCode = response.statusCode;
+    const bodyString = response.bodyString || "";
+
+    if (!isSuccessfulStatus(statusCode)) {
+      throw new Error(formatJiraError(statusCode, bodyString));
+    }
+
+    const json = parseJsonSafely(bodyString);
+    if (!json) {
+      const snippet = bodyString.trim().slice(0, 500);
+      throw new Error(
+        snippet
+          ? `Unexpected non-JSON response from Jira: ${snippet}`
+          : "Unexpected empty response from Jira."
+      );
+    }
+
+    return json;
+  };
+
+  const jiraDescriptionToText = (description) => {
+    if (!description) return "No description";
+    if (typeof description === "string") return description;
+
+    // Jira Cloud often returns "description" as Atlassian Document Format (ADF)
+    // https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
+    const isAdfDoc =
+      typeof description === "object" &&
+      description !== null &&
+      description.type === "doc" &&
+      Array.isArray(description.content);
+
+    if (!isAdfDoc) return "No description";
+
+    const lines = [];
+
+    const pushLine = (s = "") => {
+      const str = String(s);
+      // avoid runaway blank lines
+      if (str === "" && lines.length && lines[lines.length - 1] === "") return;
+      lines.push(str);
+    };
+
+    const renderInline = (node) => {
+      if (!node || typeof node !== "object") return "";
+      if (node.type === "text") return node.text || "";
+      if (node.type === "hardBreak") return "\n";
+      if (Array.isArray(node.content)) return node.content.map(renderInline).join("");
+      return "";
+    };
+
+    const renderBlock = (node, listPrefix = "") => {
+      if (!node || typeof node !== "object") return;
+
+      switch (node.type) {
+        case "paragraph":
+        case "heading": {
+          const text = Array.isArray(node.content)
+            ? node.content.map(renderInline).join("")
+            : "";
+          const normalized = text.replace(/\n{3,}/g, "\n\n").trimEnd();
+          if (normalized.trim().length) {
+            const split = normalized.split("\n");
+            if (split.length === 1) {
+              pushLine(listPrefix + split[0]);
+            } else {
+              // keep multi-line paragraphs (e.g., hardBreaks)
+              pushLine(listPrefix + split[0]);
+              for (let i = 1; i < split.length; i++) pushLine(split[i]);
+            }
+          }
+          pushLine("");
+          return;
+        }
+        case "codeBlock": {
+          const text = Array.isArray(node.content)
+            ? node.content.map(renderInline).join("")
+            : "";
+          const trimmed = text.trimEnd();
+          if (trimmed.length) {
+            pushLine(listPrefix + trimmed);
+            pushLine("");
+          }
+          return;
+        }
+        case "bulletList": {
+          if (Array.isArray(node.content)) {
+            for (const item of node.content) renderBlock(item, "- ");
+          }
+          pushLine("");
+          return;
+        }
+        case "orderedList": {
+          if (Array.isArray(node.content)) {
+            let i = 1;
+            for (const item of node.content) {
+              renderBlock(item, `${i}. `);
+              i++;
+            }
+          }
+          pushLine("");
+          return;
+        }
+        case "listItem": {
+          // render list item blocks; prefix first paragraph
+          if (Array.isArray(node.content)) {
+            let usedPrefix = false;
+            for (const child of node.content) {
+              const prefix = usedPrefix ? "  " : listPrefix;
+              renderBlock(child, prefix);
+              usedPrefix = true;
+            }
+          }
+          return;
+        }
+        default: {
+          if (Array.isArray(node.content)) {
+            for (const child of node.content) renderBlock(child, listPrefix);
+          }
+          return;
+        }
+      }
+    };
+
+    for (const node of description.content) renderBlock(node);
+
+    const joined = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    return joined.length ? joined : "No description";
+  };
+
+  const getOrCreateTagFromPath = (tagPath) => {
+    const parts = String(tagPath)
+      .split(" : ")
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    if (!parts.length) return null;
+
+    let current =
+      tags.byName(parts[0]) || flattenedTags.byName(parts[0]) || new Tag(parts[0]);
+
+    for (let i = 1; i < parts.length; i++) {
+      const name = parts[i];
+      let child = current.childNamed(name);
+      if (!child) child = new Tag(name, current);
+      current = child;
+    }
+
+    return current;
+  };
+
+  const action = new PlugIn.Action(async function (selection, sender) {
     if (shouldLogToConsole) {
       console.log("Starting JIRA Sync...");
     }
 
-    var credentialsObj = credentials.read(serviceTitle);
+    const credentialsObj = credentials.read(serviceTitle);
 
     if (app.controlKeyDown) {
       // Prompt the user to confirm the removal of stored credentials
@@ -37,7 +242,7 @@
         credentials.remove(serviceTitle);
       }
     } else if (!credentialsObj) {
-      inputForm = new Form();
+      const inputForm = new Form();
 
       const userIDField = new Form.Field.String("userID", "User ID", null);
       if (Device.iPad || Device.iOS) {
@@ -77,87 +282,59 @@
           completed: 0
         };
 
-        var userID = credentialsObj.user;
-        var apiKey = credentialsObj.password;
+        const userID = credentialsObj.user;
+        const apiKey = credentialsObj.password;
+        const authHeader = getBasicAuthHeader(userID, apiKey);
 
-        if (shouldLogToConsole) {
-          console.log("User ID:", userID);
-          console.log("API Key:", apiKey);
-        }
+        log("User ID:", userID);
 
-        jiraUrl =
+        const jiraUrlDefault =
           preferences.readString("jiraUrl") || "https://jira.atlassian.com";
-        jiraUrlInputField = new Form.Field.String("jiraUrl", "URL", jiraUrl);
+        const jiraUrlInputField = new Form.Field.String(
+          "jiraUrl",
+          "URL",
+          jiraUrlDefault
+        );
 
-        omniFocusTag = preferences.readString("omniFocusTag") || "jira";
-        omniFocusTagInputField = new Form.Field.String(
+        const omniFocusTagDefault = preferences.readString("omniFocusTag") || "jira";
+        const omniFocusTagInputField = new Form.Field.String(
           "omniFocusTag",
           "OmniFocus Tag",
-          omniFocusTag
+          omniFocusTagDefault
         );
 
-        jiraQuery =
+        const jiraQueryDefault =
           preferences.readString("jiraQuery") ||
           "assignee=currentuser() and resolution is empty";
-        jiraQueryInputField = new Form.Field.String(
+        const jiraQueryInputField = new Form.Field.String(
           "jiraQuery",
           "JIRA Search Query",
-          jiraQuery
+          jiraQueryDefault
         );
 
-        inputForm = new Form();
+        const inputForm = new Form();
         inputForm.addField(jiraUrlInputField);
         inputForm.addField(omniFocusTagInputField);
         inputForm.addField(jiraQueryInputField);
-        formPrompt = action.label;
-        formObject = await inputForm.show(formPrompt, "Continue");
+        const formPrompt = action.label;
+        const formObject = await inputForm.show(formPrompt, "Continue");
 
-        var jiraUrl = formObject.values["jiraUrl"];
+        const jiraUrl = String(formObject.values["jiraUrl"] || "").trim();
+        if (!jiraUrl) throw new Error("Jira URL is required.");
         preferences.write("jiraUrl", jiraUrl);
-        var omniFocusTag = formObject.values["omniFocusTag"];
+        const omniFocusTag = String(formObject.values["omniFocusTag"] || "").trim();
+        if (!omniFocusTag) throw new Error("OmniFocus Tag is required.");
         preferences.write("omniFocusTag", omniFocusTag);
-        var jiraQuery = formObject.values["jiraQuery"];
+        const jiraQuery = String(formObject.values["jiraQuery"] || "").trim();
+        if (!jiraQuery) throw new Error("Jira Query is required.");
         preferences.write("jiraQuery", jiraQuery);
 
-        if (shouldLogToConsole) {
-          console.log("JIRA URL:", jiraUrl);
-          console.log("OmniFocus Tag:", omniFocusTag);
-          console.log("JIRA Query:", jiraQuery);
-        }
+        log("JIRA URL:", jiraUrl);
+        log("OmniFocus Tag:", omniFocusTag);
+        log("JIRA Query:", jiraQuery);
 
         // Find the tag
-        let tag = null;
-
-        // If user gave an absolute path, parse it and process it
-        const parsedOmnifocusTagToUse = omniFocusTag.split(" : ");
-        if (parsedOmnifocusTagToUse.length > 1) {
-          let currentTag = null;
-          for (let i = 0; i < parsedOmnifocusTagToUse.length; i++) {
-            let newTag = currentTag
-              ? currentTag.childNamed(parsedOmnifocusTagToUse[i])
-              : tags.byName(parsedOmnifocusTagToUse[i]);
-
-            if (!newTag) break;
-            currentTag = newTag;
-          }
-
-          // Check if the tag was successfully found and apply it
-          if (
-            currentTag &&
-            currentTag.name ===
-              parsedOmnifocusTagToUse[parsedOmnifocusTagToUse.length - 1]
-          ) {
-            tag = currentTag;
-          }
-        }
-
-        if (!tag) {
-          // If tag is not found yet, try to find or create it
-          tag =
-            tags.byName(omniFocusTag) ||
-            flattenedTags.byName(omniFocusTag) ||
-            new Tag(omniFocusTag);
-        }
+        const tag = getOrCreateTagFromPath(omniFocusTag);
 
         if (!tag) {
           console.error(new Error("could not create tag"));
@@ -166,39 +343,24 @@
         const tasks = tag.tasks;
 
         // cache object instead of array so search will be faster later
-        let omnifocusTasks = {};
+        const omnifocusTasks = Object.create(null);
+        const matchedKeys = new Set();
         const jiraKeyRegex = new RegExp(`^[A-Z][A-Z0-9]+-\\d+`);
         tasks.forEach((task) => {
-          let taskId;
-          try {
-            taskId = task.name.match(jiraKeyRegex)[0];
-            if (!taskId) return;
-          } catch {
-            return;
-          }
+          const name = task && typeof task.name === "string" ? task.name : "";
+          const match = name.match(jiraKeyRegex);
+          const taskId = match && match[0] ? match[0] : null;
+          if (!taskId) return;
           omnifocusTasks[taskId] = task;
-          // Reset Jira Match Flag
-          omnifocusTasks[taskId].jiraToOmnifocusMatched = false;
         });
 
         // Validate API Key
         const validateUrl = jiraUrl + "/rest/api/3/myself";
-        const validateRequest = URL.FetchRequest.fromString(validateUrl);
-        validateRequest.method = "GET";
-        const validateAuth = Data.fromString(userID + ":" + apiKey).toBase64();
-        validateRequest.headers = { Authorization: "Basic " + validateAuth };
-        const validateResponse = await validateRequest.fetch();
-        if (validateResponse.statusCode !== 200) {
-          throw new Error("JIRA API Key is invalid or expired.");
-        }
-        const validateJson = JSON.parse(validateResponse.bodyString);
-        if (validateJson.apiKey && validateJson.apiKey.expiry) {
-          console.log("API Key Expiration:", validateJson.apiKey.expiry);
-        } else {
-          console.log(
-            "API Key is valid. Expiration date not provided by Jira."
-          );
-        }
+        const validateJson = await fetchJiraJson({ url: validateUrl, authHeader });
+        log(
+          "Validated Jira credentials for:",
+          validateJson.displayName || validateJson.emailAddress || "current user"
+        );
 
         const jiraFields = ["key", "summary", "description"];
 
@@ -207,75 +369,60 @@
             jiraQuery
           )}`;
           const url = jiraUrl + urlParams;
-          console.log("URL: ", url);
+          log("URL:", url);
 
-          const request = URL.FetchRequest.fromString(url);
-          request.method = "GET";
-          const data = Data.fromString(userID + ":" + apiKey);
-          const authHeader = "Basic " + data.toBase64();
+          const jsonResponse = await fetchJiraJson({ url, authHeader });
 
-          request.headers = { Authorization: authHeader };
-          const response = await request.fetch();
+          log("start", jsonResponse.startAt);
+          log("maxResults", jsonResponse.maxResults);
+          log("total", jsonResponse.total);
 
-          if (response.mimeType == "application/json") {
-            const jsonResponse = JSON.parse(response.bodyString);
-
-            // Check for API errors
-            if (jsonResponse.errorMessages || jsonResponse.errors) {
-              console.error(
-                "API Error Response:",
-                JSON.stringify(jsonResponse, null, 2)
-              );
-              throw new Error(
-                jsonResponse.errorMessages
-                  ? jsonResponse.errorMessages.join(", ")
-                  : "API returned an error"
-              );
-            }
-
-            console.log("start", jsonResponse.startAt);
-            console.log("maxResults", jsonResponse.maxResults);
-            console.log("total", jsonResponse.total);
-
-            // The new API uses 'values' instead of 'issues'
-            const issues = jsonResponse.values || jsonResponse.issues || [];
-            for (const issue of issues) {
-              // Search if we need to add a new Task
-              checkedTickets++;
-              const existingTask = omnifocusTasks[issue.key];
-              if (existingTask) {
-                // Track if task was completed before reopening
-                const wasCompleted = existingTask.completed;
-                // Make sure the task opens again
-                existingTask.markIncomplete();
-                if (wasCompleted) {
-                  syncStats.reopened++;
-                }
-                existingTask.jiraToOmnifocusMatched = true;
-                continue;
+          // The new API uses 'values' instead of 'issues'
+          const issues = jsonResponse.values || jsonResponse.issues || [];
+          for (const issue of issues) {
+            // Search if we need to add a new Task
+            checkedTickets++;
+            matchedKeys.add(issue.key);
+            const existingTask = omnifocusTasks[issue.key];
+            if (existingTask) {
+              // Track if task was completed before reopening
+              const wasCompleted = existingTask.completed;
+              // Make sure the task opens again
+              existingTask.markIncomplete();
+              if (wasCompleted) {
+                syncStats.reopened++;
               }
-
-              // There was no Matching Task, so we create the Task
-              const taskName = `${issue.key} ${issue.fields.summary}`;
-              const newTask = new Task(taskName, inbox.beginning);
-              const taskUrl = `${jiraUrl}/browse/${issue.key}`;
-              syncStats.created++;
-
-              newTask.addTag(tag);
-              newTask.note = `${taskUrl}\n${
-                issue.fields.description || "No description"
-              }`;
+              continue;
             }
 
-            // Check if there are more results to fetch
-            if (
-              jsonResponse.startAt + jsonResponse.maxResults <
-              jsonResponse.total
-            ) {
-              await fetchJiraIssues(
-                jsonResponse.startAt + jsonResponse.maxResults
-              );
-            }
+            // There was no Matching Task, so we create the Task
+            const summary =
+              issue &&
+              issue.fields &&
+              typeof issue.fields.summary === "string" &&
+              issue.fields.summary.trim().length
+                ? issue.fields.summary.trim()
+                : "(No summary)";
+            const taskName = `${issue.key} ${summary}`;
+            const newTask = new Task(taskName, inbox.beginning);
+            const taskUrl = `${jiraUrl}/browse/${issue.key}`;
+            syncStats.created++;
+
+            newTask.addTag(tag);
+            const descriptionText = jiraDescriptionToText(
+              issue && issue.fields ? issue.fields.description : null
+            );
+            newTask.note = `${taskUrl}\n${descriptionText}`;
+          }
+
+          // Check if there are more results to fetch
+          if (
+            jsonResponse.startAt + jsonResponse.maxResults <
+            jsonResponse.total
+          ) {
+            await fetchJiraIssues(
+              jsonResponse.startAt + jsonResponse.maxResults
+            );
           }
         };
 
@@ -285,7 +432,7 @@
 
         // Close Tasks
         for (const [task_id, task] of Object.entries(omnifocusTasks)) {
-          if (!task.jiraToOmnifocusMatched) {
+          if (!matchedKeys.has(task_id)) {
             let canDelete = true;
 
             if (task.hasChildren) {
@@ -313,17 +460,30 @@
         );
 
         // Show summary alert only if changes were made
-        const totalChanges = syncStats.created + syncStats.reopened + syncStats.completed;
+        const totalChanges =
+          syncStats.created + syncStats.reopened + syncStats.completed;
         if (totalChanges > 0) {
           const summaryLines = [];
           if (syncStats.created > 0) {
-            summaryLines.push(`✨ Created: ${syncStats.created} task${syncStats.created !== 1 ? "s" : ""}`);
+            summaryLines.push(
+              `✨ Created: ${syncStats.created} task${
+                syncStats.created !== 1 ? "s" : ""
+              }`
+            );
           }
           if (syncStats.reopened > 0) {
-            summaryLines.push(`🔄 Reopened: ${syncStats.reopened} task${syncStats.reopened !== 1 ? "s" : ""}`);
+            summaryLines.push(
+              `🔄 Reopened: ${syncStats.reopened} task${
+                syncStats.reopened !== 1 ? "s" : ""
+              }`
+            );
           }
           if (syncStats.completed > 0) {
-            summaryLines.push(`✓ Completed: ${syncStats.completed} task${syncStats.completed !== 1 ? "s" : ""}`);
+            summaryLines.push(
+              `✓ Completed: ${syncStats.completed} task${
+                syncStats.completed !== 1 ? "s" : ""
+              }`
+            );
           }
           summaryLines.push(`\nTotal time: ${syncDuration}s`);
 
